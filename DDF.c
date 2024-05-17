@@ -6,40 +6,30 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
-// Función para encontrar la mediana en un array
-unsigned char find_median(unsigned char *window, int size) {
-    for (int i = 0; i < size - 1; i++) {
-        for (int j = i + 1; j < size; j++) {
-            if (window[i] > window[j]) {
-                unsigned char temp = window[i];
-                window[i] = window[j];
-                window[j] = temp;
-            }
-        }
-    }
-    return window[size / 2];
-}
-
-// Función para aplicar el filtro de mediana a una sección de la imagen
-void apply_mmf_section(unsigned char *input, unsigned char *output, int width, int height, int channels) {
-    int window_size = 3;
-    int window_half = window_size / 2;
-    unsigned char window[window_size * window_size];
+// Función para aplicar el filtro DDF a una sección de la imagen
+void apply_ddf_section(unsigned char *input, unsigned char *output, int width, int height, int channels) {
+    int kernel_size = 3;
+    int kernel_half = kernel_size / 2;
+    int weights[3][3] = {
+        {-1, -1, -1},
+        {-1,  8, -1},
+        {-1, -1, -1}
+    };
 
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
             for (int c = 0; c < channels; c++) {
-                int count = 0;
-                for (int wy = -window_half; wy <= window_half; wy++) {
-                    for (int wx = -window_half; wx <= window_half; wx++) {
-                        int ny = y + wy;
-                        int nx = x + wx;
-                        if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
-                            window[count++] = input[(ny * width + nx) * channels + c];
+                int sum = 0;
+                for (int ky = -kernel_half; ky <= kernel_half; ky++) {
+                    for (int kx = -kernel_half; kx <= kernel_half; kx++) {
+                        int nx = x + kx;
+                        int ny = y + ky;
+                        if (nx >= 0 && ny >= 0 && nx < width && ny < height) {
+                            sum += input[(ny * width + nx) * channels + c] * weights[ky + kernel_half][kx + kernel_half];
                         }
                     }
                 }
-                output[(y * width + x) * channels + c] = find_median(window, count);
+                output[(y * width + x) * channels + c] = (unsigned char)(sum > 255 ? 255 : (sum < 0 ? 0 : sum));
             }
         }
     }
@@ -83,8 +73,8 @@ int main(int argc, char *argv[]) {
     // Distribuir las secciones de datos a todos los procesos
     MPI_Scatter(image, section_size, MPI_UNSIGNED_CHAR, input_section, section_size, MPI_UNSIGNED_CHAR, 0, MPI_COMM_WORLD);
 
-    // Aplicar el filtro de mediana a la sección de datos localmente
-    apply_mmf_section(input_section, output_section, width, height, channels);
+    // Aplicar el filtro DDF a la sección de datos localmente
+    apply_ddf_section(input_section, output_section, width, height, channels);
 
     // Recolectar las secciones de salida de todos los procesos en el proceso 0
     MPI_Gather(output_section, section_size, MPI_UNSIGNED_CHAR, image, section_size, MPI_UNSIGNED_CHAR, 0, MPI_COMM_WORLD);
